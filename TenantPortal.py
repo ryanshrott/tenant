@@ -60,6 +60,7 @@ def extract_text_with_pytesseract(list_dict_final_images):
     return "\n".join(image_content)
 
 def process_and_upload_file(file, doc_type, tenant_name, selected_address):
+    print(file, doc_type, tenant_name, selected_address)
     # Check if the file is a string (like youtube_intro) or a file-like object
     if isinstance(file, str):
         # If it's a string, upload it directly
@@ -166,6 +167,7 @@ def main():
     with st.form(key='upload_form'):
         st.markdown('#### Required Documents')
         tenant_name = st.text_input("Enter your full name:")
+        tenant_name = tenant_name.strip()
         available_listings = fetch_listings()
         if not available_listings:
             st.warning("No listings available at the moment. Please ask your landlord/realtor to create a listing.")
