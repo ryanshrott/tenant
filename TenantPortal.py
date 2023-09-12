@@ -30,13 +30,13 @@ LISTINGS_FOLDER = "listings/"
 # Initialize S3 client
 s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 
-# Add the poppler path to the PATH environment variable
-poppler_path = r"C:\Program Files\poppler-23.08.0\Library\bin"
-os.environ["PATH"] += os.pathsep + poppler_path
-
-
-# Set the path for tesseract
-pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Change this to the path where tesseract is installed
+# only do this if you are on windows operating system
+if os.name == 'nt':
+    # Add the poppler path to the PATH environment variable
+    poppler_path = r"C:\Program Files\poppler-23.08.0\Library\bin"
+    os.environ["PATH"] += os.pathsep + poppler_path
+    # Set the path for tesseract
+    pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Change this to the path where tesseract is installed
 
 def extract_text_from_docx(file):
     doc = Document(file)
