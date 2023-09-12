@@ -4,3 +4,4 @@ Pillow==9.5.0
 pytesseract==0.3.10
 python_docx==0.8.11
 streamlit==1.26.0
+python-dotenv

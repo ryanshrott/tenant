@@ -3,28 +3,17 @@ import boto3
 from io import BytesIO
 import os
 from docx import Document
-
-# AWS Credentials
-AWS_ACCESS_KEY_ID = st.secrets['AWS_ACCESS_KEY_ID']
-AWS_SECRET_ACCESS_KEY = st.secrets['AWS_SECRET_ACCESS_KEY']
-BUCKET_NAME = st.secrets['BUCKET_NAME']
-LISTINGS_FOLDER = "listings/"
-
-# Initialize S3 client
-s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-
-import streamlit as st
-import boto3
 from io import BytesIO
 from pytesseract import pytesseract
 from pytesseract import image_to_string
 from PIL import Image
 from pdf2image import convert_from_bytes
-
-# AWS Credentials
-AWS_ACCESS_KEY_ID = st.secrets['AWS_ACCESS_KEY_ID']
-AWS_SECRET_ACCESS_KEY = st.secrets['AWS_SECRET_ACCESS_KEY']
-BUCKET_NAME = st.secrets['BUCKET_NAME']
+from dotenv import load_dotenv
+load_dotenv()
+# AWS Credentials from OS environment variables
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+BUCKET_NAME = os.environ.get('BUCKET_NAME')
 LISTINGS_FOLDER = "listings/"
 
 # Initialize S3 client
