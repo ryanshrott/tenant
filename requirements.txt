@@ -1,7 +1,11 @@
 boto3==1.28.44
+docx2pdf==0.1.8
 pdf2image==1.16.3
 Pillow==9.5.0
+pymongo==4.5.0
+PyPDF2==3.0.1
 pytesseract==0.3.10
+python-dotenv==1.0.0
 python_docx==0.8.11
+reportlab==4.0.4
 streamlit==1.26.0
-python-dotenv

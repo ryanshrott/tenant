@@ -6,18 +6,44 @@ from docx import Document
 from io import BytesIO
 from pytesseract import pytesseract
 from pytesseract import image_to_string
-from PIL import Image
+from PIL import Image as PILImage
 from pdf2image import convert_from_bytes
 from dotenv import load_dotenv
+from pymongo import MongoClient
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import PyPDF2
+from reportlab.lib.pagesizes import letter
+import docx2pdf
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from utils import *
+import tempfile
+import io
+
 load_dotenv()
 # AWS Credentials from OS environment variables
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 LISTINGS_FOLDER = "listings/"
-
+MONGO_URI = os.environ.get('MONGO_URI')
 # Initialize S3 client
-s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+@st.cache_resource
+def s3_client():
+    s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+    return s3
+s3 = s3_client()
 
 # only do this if you are on windows operating system
 if os.name == 'nt':
@@ -27,146 +53,135 @@ if os.name == 'nt':
     # Set the path for tesseract
     pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Change this to the path where tesseract is installed
 
-def extract_text_from_docx(file):
-    doc = Document(file)
-    full_text = []
-    for paragraph in doc.paragraphs:
-        full_text.append(paragraph.text)
-    return '\n'.join(full_text)
+def send_email(subject, message, to_address, tenant_name, tenant_address, attachment_path=None):
+    print('trying to send email')
+    from_address = 'ryan@smartbids.ai'
+    password = os.getenv("EMAIL_PASS")
+    msg = MIMEMultipart()
+    msg['From'] = from_address
+    msg['To'] = to_address
+    msg['Subject'] = subject
 
+    # Personalize the message
+    personalized_message = f"Hello {tenant_name},\n\n{message}\n\nAddress: {tenant_address}\n\n"
+    # Add an advertisement for SmartBids.ai
+    ad_message = "\n\n---\nCheck out SmartBids.ai - Your go-to real estate pricing application!"
+    full_message = personalized_message + ad_message
+    msg.attach(MIMEText(full_message, 'plain'))
 
-def convert_pdf_to_images(file_bytes, dpi=300):
-    images = convert_from_bytes(file_bytes.getvalue(), dpi=dpi)
-    final_images = []
+    # Attach the file if provided and exists
+    if attachment_path and os.path.exists(attachment_path):
+        with open(attachment_path, 'rb') as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f"attachment; filename= {os.path.basename(attachment_path)}")
+            msg.attach(part)
+    elif attachment_path:
+        print(f"File {attachment_path} not found. Email will be sent without attachment.")
 
-    for index, image in enumerate(images):
-        image_byte_array = BytesIO()
-        image.save(image_byte_array, format='jpeg', optimize=True)
-        image_byte_array = image_byte_array.getvalue()
-        final_images.append(dict({index: image_byte_array}))
+    server = smtplib.SMTP_SSL('mail.privateemail.com', 465)
+    server.login(from_address, password)
+    text = msg.as_string()
+    server.sendmail(from_address, to_address, text)
+    server.quit()
 
-    return final_images
+def create_pdf_with_textual_data(data, filename):
+    doc = SimpleDocTemplate(filename, pagesize=letter)
+    Story = []
 
-def extract_text_with_pytesseract(list_dict_final_images):
-    image_list = [list(data.values())[0] for data in list_dict_final_images]
-    image_content = []
-    
-    for index, image_bytes in enumerate(image_list):
-        image = Image.open(BytesIO(image_bytes))
-        raw_text = str(image_to_string(image))
-        st.write(raw_text)
-        image_content.append(raw_text)
-    
-    return "\n".join(image_content)
+    # Add a logo (assuming you have a logo.png file)
+    logo = "logo.png"
+    im = Image(logo, 3.5*inch, 2.5*inch)  # Increased width for the logo
+    im.hAlign = 'CENTER'
+    Story.append(im)
+    Story.append(Spacer(1, 0.5*inch))
 
-def process_and_upload_file(file, doc_type, tenant_name, selected_address):
-    print(file, doc_type, tenant_name, selected_address)
-    # Check if the file is a string (like youtube_intro) or a file-like object
-    if isinstance(file, str):
-        # If it's a string, upload it directly
-        upload_to_s3(file, doc_type, tenant_name, selected_address, is_text=True)
-        return
+    # Define styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Centered', alignment=1))
+    styles.add(ParagraphStyle(name='Bold', fontSize=14, leading=18, spaceAfter=12, textColor=colors.blue))
+    styles.add(ParagraphStyle(name='Hyperlink', textColor=colors.blue, underline=True))
 
-    # If it's a file-like object, determine the file type from the file extension
+    # Add a title
+    title = Paragraph("<u>Tenant Application Report</u>", styles['Title'])
+    Story.append(title)
+    Story.append(Spacer(1, 0.25*inch))
+
+    # Add a subtitle indicating the report was generated by SmartBids.ai
+    subtitle = Paragraph("Generated by <a href='https://smartbids.ai/' color='blue'>SmartBids.ai</a> on behalf of the tenant", styles['Centered'])
+    Story.append(subtitle)
+    Story.append(Spacer(1, 0.5*inch))
+
+    # Add the textual data
+    for key, value in data.items():
+        p_text = f"<b>{key}:</b> {value}"
+        p = Paragraph(p_text, styles['Normal'])
+        Story.append(p)
+        Story.append(Spacer(1, 0.15*inch))
+
+    # Build the PDF
+    doc.build(Story)
+
+def combine_pdfs(list_of_pdfs, output_filename):
+    merger = PyPDF2.PdfMerger()  # Use PdfMerger instead of PdfFileMerger
+
+    for pdf in list_of_pdfs:
+        merger.append(pdf)
+
+    merger.write(output_filename)
+    merger.close()
+
+def convert_text_to_pdf(text_content, output_filename):
+    """Converts text content to a PDF file."""
+    c = canvas.Canvas(output_filename, pagesize=letter)
+    width, height = letter
+    y_position = height - 100  # Start from top of the page
+
+    for line in text_content.split('\n'):
+        c.drawString(100, y_position, line)
+        y_position -= 30  # Move to next line
+
+    c.save()
+
+def convert_docx_to_pdf(input_filename, output_filename):
+    """Converts a DOCX file to a PDF file."""
+    docx2pdf.convert(input_filename, output_filename)
+
+def process_file(file, list_of_pdfs):
     file_type = file.name.split('.')[-1].lower()
-
-    # Save the original file
-    upload_to_s3(file, doc_type, tenant_name, selected_address)
-
-    # If the file type is PDF, convert to images and extract text
     if file_type == 'pdf':
-        images = convert_pdf_to_images(file)
-        for idx, image_data in enumerate(images):
-            image_key = f"{LISTINGS_FOLDER}{selected_address}/{tenant_name.replace(' ', '_')}/{doc_type.replace(' ', '_')}/{file.name}_page_{idx + 1}.jpeg"
-            s3.put_object(
-                Bucket=BUCKET_NAME,
-                Key=image_key,
-                Body=image_data[list(image_data.keys())[0]],
-                Metadata={
-                    'tenant_name': tenant_name,
-                    'address': selected_address,
-                    'document_type': doc_type
-                }
-            )
-        text_content = extract_text_with_pytesseract(images)
-        
-        # Use the original file name but change the extension to .txt
-        text_file_name = file.name.rsplit('.', 1)[0] + '.txt'
-        text_key = f"{LISTINGS_FOLDER}{selected_address}/{tenant_name.replace(' ', '_')}/{doc_type.replace(' ', '_')}/{text_file_name}"
-        
-        s3.put_object(
-            Bucket=BUCKET_NAME,
-            Key=text_key,
-            Body=text_content,
-            Metadata={
-                'tenant_name': tenant_name,
-                'address': selected_address,
-                'document_type': doc_type
-            }
-        )
-    elif file_type in ['doc', 'docx']:
-        text_content = extract_text_from_docx(file)
-        
-        # Use the original file name but change the extension to .txt
-        text_file_name = file.name.rsplit('.', 1)[0] + '.txt'
-        text_key = f"{LISTINGS_FOLDER}{selected_address}/{tenant_name.replace(' ', '_')}/{doc_type.replace(' ', '_')}/{text_file_name}"
-        
-        s3.put_object(
-            Bucket=BUCKET_NAME,
-            Key=text_key,
-            Body=text_content,
-            Metadata={
-                'tenant_name': tenant_name,
-                'address': selected_address,
-                'document_type': doc_type
-            }
-        )
-
-
-def fetch_listings():
-    """Fetch available listings from S3"""
-    response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=LISTINGS_FOLDER, Delimiter='/')
-    if 'CommonPrefixes' not in response:
-        return []
-    return [prefix['Prefix'].replace(LISTINGS_FOLDER, '').rstrip('/') for prefix in response['CommonPrefixes']]
-def upload_to_s3(content, doc_type, tenant_name, address, is_text=False):
-    """Upload a file or text to an S3 bucket with structured naming and metadata"""
-    buffer = BytesIO()
-    
-    if is_text:
-        # If the content is a string, encode it
-        buffer.write(content.encode())
-    else:
-        # If the content is a file-like object, read its chunks
-        for chunk in content:
-            buffer.write(chunk)
-    
-    buffer.seek(0)
-    
-    # Structured naming convention: listings/address/candidate_name/documentType/document_filename.ext
-    if is_text:
-        key = f"{LISTINGS_FOLDER}{address}/{tenant_name.replace(' ', '_')}/{doc_type.replace(' ', '_')}/file.txt"
-    else:
-        key = f"{LISTINGS_FOLDER}{address}/{tenant_name.replace(' ', '_')}/{doc_type.replace(' ', '_')}/{content.name}"
-    
-    s3.put_object(
-        Bucket=BUCKET_NAME,
-        Key=key,
-        Body=buffer,
-        Metadata={
-            'tenant_name': tenant_name,
-            'address': address,
-            'document_type': doc_type
-        }
-    )
-
+        list_of_pdfs.append(file)
+    elif file_type == 'txt':
+        output_filename = file.name.rsplit('.', 1)[0] + '.pdf'
+        convert_text_to_pdf(file.getvalue().decode(), output_filename)
+        list_of_pdfs.append(output_filename)
+    elif file_type == 'docx':
+        output_filename = file.name.rsplit('.', 1)[0] + '.pdf'
+        with open(file.name, 'wb') as f:
+            f.write(file.getvalue())
+        convert_docx_to_pdf(file.name, output_filename)
+        list_of_pdfs.append(output_filename)
 
 def main():
-    st.title("Document Upload for Tenants")
+    st.title("Free Tenant Application Generator")
+    st.markdown('### Powered by [SmartBids.ai](https://app.smartbids.ai/)')
+    st.markdown("This app generates a tenant application for you based on your documents and information. It's free to use and you can apply to as many listings as you want!")
+    st.markdown('### How it works')
+    st.markdown("1. Fill in the form below with your information and upload your documents.")
+    st.markdown("2. We'll generate a tenant application for you and send it to your email address.")
+    st.markdown("3. If you request, we can automatically send the application to your landlord/realtor/property manager")
+
 
     with st.form(key='upload_form'):
         st.markdown('#### Required Documents')
-        tenant_name = st.text_input("Enter your full name:")
+        tenant_name = st.text_input("Enter your full name(s):")
+        cols = st.columns(2)
+        with cols[0]:
+            email_address = st.text_input("Enter your email address:")
+        with cols[1]:
+            phone_number = st.text_input("Enter your phone number:")
+        about_you = st.text_area("Tell us about yourself (optional):")
         tenant_name = tenant_name.strip()
         available_listings = fetch_listings()
         if not available_listings:
@@ -175,36 +190,100 @@ def main():
         else:
             selected_address = st.selectbox("Select the address you're applying for:", available_listings)
 
-        credit_score_files = st.file_uploader("Upload your Credit Score(s)", type=['pdf', 'docx', 'txt'], accept_multiple_files=True)
+        credit_score_files = st.file_uploader("Upload your Credit Score(s) official report", type=['pdf', 'docx', 'txt'], accept_multiple_files=True)
+        credit_score = st.text_input("What is your Credit Score?")
         job_letter_files = st.file_uploader("Upload your Job Letter(s)", type=['pdf',  'docx', 'txt'], accept_multiple_files=True)
-        paystub_files = st.file_uploader("Upload your Paystub(s)", type=['pdf', 'docx', 'txt'], accept_multiple_files=True)
+        job_summary = st.text_input("What is your current job and sources of income?")
+        paystub_files = st.file_uploader("Upload your most recent Paystub(s)", type=['pdf', 'docx', 'txt'], accept_multiple_files=True)
+        paystub_summary = st.text_input("What is your minimum net monthly income (i.e. income after tax deductions)?")
+        landlord_reference = st.file_uploader("Upload your previous landlord reference letters", type=['pdf', 'doc', 'txt'], accept_multiple_files=True)
+        landlord_phone = st.text_input("What is your previous landlord's phone number?")
+        form_310_lease = st.file_uploader("Upload Form 310 Lease (Residential Tenancy Agreement) [DOWNLOAD HERE](https://forms.mgcs.gov.on.ca/en/dataset/047-2229)", type=['pdf', 'doc', 'txt'])
         st.markdown('#### Optional Documents')
         youtube_intro = st.text_input("Enter a 1-minute YouTube video intro URL (optional)")
         cv_file = st.file_uploader("Upload your CV (optional)", type=['pdf', 'docx', 'txt'])
         bank_files = st.file_uploader("Upload Bank Statements (optional)", type=['pdf', 'doc', 'txt'], accept_multiple_files=True)
+
         submit_button = st.form_submit_button(label='Upload All Documents')
 
         if submit_button:
-            if tenant_name and selected_address:
-                if credit_score_files:
-                    for file in credit_score_files:
-                        process_and_upload_file(file, "Credit Score", tenant_name, selected_address)
-                if job_letter_files:
-                    for file in job_letter_files:
-                        process_and_upload_file(file, "Job Letter", tenant_name, selected_address)
-                if paystub_files:
-                    for file in paystub_files:
-                        process_and_upload_file(file, "Paystub", tenant_name, selected_address)
-                if cv_file:
-                    process_and_upload_file(cv_file, "CV", tenant_name, selected_address)
-                if youtube_intro:
-                    process_and_upload_file(youtube_intro, "YouTube URL", tenant_name, selected_address)
-                if bank_files:
-                    for file in bank_files:
-                        process_and_upload_file(file, "Bank Statement", tenant_name, selected_address)
-                st.success("Documents and URLs uploaded successfully!")
-            else:
-                st.warning("Please fill in all required fields.")
+            with st.spinner('Generating application...hold tight!'):
+                if tenant_name and email_address and selected_address:
+                    # Save non-document data to MongoDB
+                    save_to_mongo(tenant_name, email_address, phone_number, about_you, credit_score, job_summary, landlord_phone, youtube_intro, paystub_summary, selected_address)
+                    # Upload documents to S3
+                    if credit_score_files:
+                        for file in credit_score_files:
+                            process_and_upload_file(file, "Credit Score", tenant_name, selected_address)
+                    if job_letter_files:
+                        for file in job_letter_files:
+                            process_and_upload_file(file, "Job Letter", tenant_name, selected_address)
+                    if paystub_files:
+                        for file in paystub_files:
+                            process_and_upload_file(file, "Paystub", tenant_name, selected_address)
+                    if cv_file:
+                        process_and_upload_file(cv_file, "CV", tenant_name, selected_address)
+                    if bank_files:
+                        for file in bank_files:
+                            process_and_upload_file(file, "Bank Statement", tenant_name, selected_address)
+                    if form_310_lease:
+                        process_and_upload_file(form_310_lease, "Form 310 Lease", tenant_name, selected_address)
+                    if landlord_reference:
+                        for file in landlord_reference:
+                            process_and_upload_file(file, "Landlord Reference", tenant_name, selected_address)
+
+                    # Create a PDF with the textual data
+                    textual_data = {
+                        "Tenant Name": tenant_name,
+                        "Email Address": email_address,
+                        "Phone Number": phone_number,
+                        "About You": about_you,
+                        "Credit Score": credit_score,
+                        "Job Summary": job_summary,
+                        "Landlord Phone": landlord_phone,
+                        "YouTube Intro": youtube_intro,
+                        "Paystub Summary": paystub_summary
+                    }
+                    pdf_filename = "textual_data.pdf"
+                    create_pdf_with_textual_data(textual_data, pdf_filename)
+
+                    # List of all PDFs to be combined
+                    list_of_pdfs = [pdf_filename]  # Start with the textual data PDF
+
+                    all_files = credit_score_files + job_letter_files + paystub_files + [cv_file] + bank_files + [form_310_lease] + [landlord_reference]
+
+                    for file in all_files:
+                        if file:
+                            # Handle the case where file is a list of file-like objects
+                            if isinstance(file, list):
+                                for individual_file in file:
+                                    process_file(individual_file, list_of_pdfs)
+                            else:
+                                process_file(file, list_of_pdfs)
+
+                    combined_pdf_filename = f"Tenant_Application_{tenant_name}.pdf"
+                    combine_pdfs(list_of_pdfs, combined_pdf_filename)
+
+                    # Create a temporary file for the combined PDF
+                    with tempfile.NamedTemporaryFile(delete=True, suffix=".pdf") as temp_combined_pdf:
+                        temp_combined_pdf.write(open(combined_pdf_filename, 'rb').read())
+
+                        # Use the temporary file in the process_and_upload_file function
+                        temp_combined_pdf.seek(0)  # Rewind the file pointer
+                        temp_combined_pdf.name = combined_pdf_filename  # Change the name of the file to match the original filename
+                        process_and_upload_file(temp_combined_pdf, "Final Application", tenant_name, selected_address, only_write_base_file=True)
+
+
+                    # Send email with the combined PDF attached
+                    email_subject = "Submission Confirmation"
+                    email_message = "Your submission was successful! Please find attached a document containing everything you submitted."
+                    send_email(email_subject, email_message, email_address, tenant_name, selected_address, combined_pdf_filename)
+
+
+                    st.success("Documents and URLs uploaded successfully!")
+                    st.balloons()
+                else:
+                    st.warning("Please fill in all required fields.")
 
 
 if __name__ == "__main__":
