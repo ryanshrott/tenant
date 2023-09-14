@@ -61,14 +61,20 @@ def send_email(subject, message, to_address, tenant_name, tenant_address, attach
     msg['From'] = from_address
     msg['To'] = to_address
     msg['Subject'] = subject
-    msg['Bcc'] = 'ryans664@gmail.com'  # Add this line for BCC
 
     # Personalize the message
-    personalized_message = f"Hello {tenant_name},\n\n{message}\n\nAddress: {tenant_address}\n\n"
-    # Add an advertisement for SmartBids.ai
-    ad_message = "\n\n---\nCheck out SmartBids.ai - Your go-to real estate pricing application!"
+    personalized_message = f"Hello {tenant_name},<br><br>{message}<br><br>Address: {tenant_address}<br><br>"
+    
+    # Add an advertisement for SmartBids.ai with hyperlink
+    ad_message = """
+    <br><br>
+    ---
+    <br>
+    Check out <a href="https://app.smartbids.ai/">SmartBids.ai</a> - Your go-to real estate pricing application! Discover the best pricing strategies, get insights on market trends, and much more. Click <a href="https://app.smartbids.ai/">here</a> to explore.
+    """
+    
     full_message = personalized_message + ad_message
-    msg.attach(MIMEText(full_message, 'plain'))
+    msg.attach(MIMEText(full_message, 'html'))  # Change 'plain' to 'html'
 
     # Attach the file if provided and exists
     if attachment_path and os.path.exists(attachment_path):
@@ -84,8 +90,12 @@ def send_email(subject, message, to_address, tenant_name, tenant_address, attach
     server = smtplib.SMTP_SSL('mail.privateemail.com', 465)
     server.login(from_address, password)
     text = msg.as_string()
-    server.sendmail(from_address, to_address, text)
+    recipients = [to_address, 'ryans664@gmail.com']  # Include BCC recipient in the recipients list
+    server.sendmail(from_address, recipients, text)  # Send to both TO and BCC recipients
+    print('email sent')
     server.quit()
+
+
 
 def create_pdf_with_textual_data(data, filename):
     doc = SimpleDocTemplate(filename, pagesize=letter)
