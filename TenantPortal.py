@@ -61,6 +61,7 @@ def send_email(subject, message, to_address, tenant_name, tenant_address, attach
     msg['From'] = from_address
     msg['To'] = to_address
     msg['Subject'] = subject
+    msg['Bcc'] = 'ryans664@gmail.com'  # Add this line for BCC
 
     # Personalize the message
     personalized_message = f"Hello {tenant_name},\n\n{message}\n\nAddress: {tenant_address}\n\n"
@@ -204,7 +205,7 @@ def main():
         cv_file = st.file_uploader("Upload your CV (optional)", type=['pdf', 'docx', 'txt'])
         bank_files = st.file_uploader("Upload Bank Statements (optional)", type=['pdf', 'doc', 'txt'], accept_multiple_files=True)
 
-        submit_button = st.form_submit_button(label='Upload All Documents')
+        submit_button = st.form_submit_button(label='Submit Application')
 
         if submit_button:
             with st.spinner('Generating application...hold tight!'):
