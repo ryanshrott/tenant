@@ -1,5 +1,3 @@
-[build]
-nixpacksVersion = "1.15.0"
 [phases.tesseract]
 cmds = [
   "apt update",
